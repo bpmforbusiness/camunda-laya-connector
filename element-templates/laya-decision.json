@@ -1,0 +1,39 @@
+{
+  "$schema": "https://unpkg.com/@camunda/element-templates-json-schema@0.15.0/resources/schema.json",
+  "name": "Laya Decision (System 1)",
+  "id": "com.bpmforbusiness.laya:decision:1",
+  "appliesTo": ["bpmn:ServiceTask"],
+  "version": 1,
+  "description": "Run a Laya (open-source System 1) typed decision on a self-hosted server. Registers a pre-approved DecisionPack by name; writes the typed answers (choice/score/noul) to the process as 'jev'.",
+  "properties": [
+    {
+      "label": "Worker type",
+      "type": "Hidden",
+      "value": "io.bpmforbusiness.laya:decision:1",
+      "binding": { "type": "zeebe:taskDefinition", "property": "type" }
+    },
+    {
+      "label": "Decision pack",
+      "description": "Name of a DecisionPack registered in the worker (e.g. support/triage). Only pre-approved packs can be selected.",
+      "type": "String",
+      "value": "support/triage",
+      "binding": { "type": "zeebe:input", "name": "jevPack" },
+      "constraints": { "notEmpty": true }
+    },
+    {
+      "label": "State variable",
+      "description": "Process variable holding the state/context the model decides over.",
+      "type": "String",
+      "value": "ticketText",
+      "binding": { "type": "zeebe:input", "name": "jevState" },
+      "constraints": { "notEmpty": true }
+    },
+    {
+      "label": "Result variable name",
+      "description": "Process variable that receives the full decision record (model + typed answers + usage).",
+      "type": "String",
+      "value": "jev",
+      "binding": { "type": "zeebe:taskHeader", "key": "outVariable" }
+    }
+  ]
+}
