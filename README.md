@@ -1,168 +1,144 @@
 # camunda-laya-connector
 
-Camunda 8 service-task worker that runs decisions on **Laya** — the open-source
-System-1 (trained, non-autoregressive) decision engine — as BPMN service tasks in
-Camunda 8. Java 21, Maven, MIT.
+Run decisions on **Laya** — the open-source System-1 (trained, non-autoregressive)
+decision engine — from Camunda 8, two ways:
 
-Why: replace an LLM-in-the-loop decision with a fast, auditable, typed decision
-engine. A decision engine's output is a **scored candidate, not a fact** — branch
-on it, but keep the record for audit.
+- **`connector/`** — an official **Camunda Connector SDK outbound connector**
+  ("Laya Decision (System 1)"), for use in Camunda Modeler / Hub and the Camunda
+  connector runtime. The path for publishing on [Camunda Marketplace](https://marketplace.camunda.com).
+- **`worker/`** — a standalone **Zeebe job worker** you deploy and operate yourself
+  (`io.bpmforbusiness.laya:decision:1`).
 
-- **Task type:** `io.bpmforbusiness.laya:decision:1`
-- **Wire protocol:** Jev-compatible `POST {LAYABASE_URL}/v1/systemone`
-- **Safety boundary:** processes may only reference a **pre-approved DecisionPack**
-  registered in the worker — never arbitrary question sets or credentials from
-  process variables.
+Both share one **`core/`** module (`DecisionPack` + `DecisionRegistry` + `LayaClient`).
+Java 21, Maven, MIT.
 
----
+## Why
 
-## Layout
+Replace an LLM-in-the-loop decision with a fast, auditable, typed decision engine.
+A decision engine's output is a **scored candidate, not a fact** — branch on it, but
+keep the record for audit.
+
+## Features
+
+- **Agentic-but-typed decisions:** choice / score / yes-no (noul) answers from a
+  System-1 engine instead of an LLM call.
+- **DecisionPack safety boundary:** workflows may only reference **pre-approved**
+  decision packs — never arbitrary question sets or credentials from process variables.
+- **Works with your existing stack:** Laya is self-hosted and uses the Jev-compatible
+  `POST /v1/systemone` wire protocol — no model-key dependency in the connector itself.
+
+## Architecture
 
 ```
-src/main/java/com/bpmforbusiness/laya/
-  worker/LayaDecisionWorkerMain.java   Entry point: builds the Zeebe client from env,
-                                       registers the worker, blocks forever.
-  decision/LayaDecisionWorker.java     JobHandler: resolves pack, validates state,
-                                       calls Laya, writes the result; zero-retry fail
-                                       (→ incident) on unregistered pack / missing state.
-  decision/LayaClient.java             Thin HTTP client for POST /v1/systemone.
-  decision/DecisionRegistry.java       Pre-approved packs (only these can be selected).
-  decision/DecisionPack.java           A pack: stable name + question schema + in/out vars.
-element-templates/laya-decision.json   Camunda Modeler element template ("Laya Decision (System 1)").
-src/test/.../DecisionPackTest.java     5 unit tests (registry resolution, wire mapping).
+core/        DecisionPack, DecisionRegistry, LayaClient  (no Zeebe, no SDK)
+worker/      LayaDecisionWorker + Main — Zeebe worker (self-hosted deployable)
+connector/   LayaDecisionConnector — Camunda Connector SDK outbound connector
 ```
 
 ## Wire contract
 
-Request (the worker POSTs this to `{LAYABASE_URL}/v1/systemone`):
+Request (POST `{baseUrl}/v1/systemone`):
 
 ```json
 {
-  "state": "<the process state/context to decide over>",
+  "state": "<the state/context to decide over>",
   "questions": {
     "<qid>": { "type": "choice|score|yes-no|noul", "instructions": "...", "criteria": {...} }
   }
 }
 ```
 
-Response (written back to the process under the result variable, default `jev`):
+Response (mapped by the process via **Result Variable** / **Result Expression**):
 
 ```json
 {
   "model": "...",
-  "answers": {
-    "<qid>": { "type": "choice", "choice": "...", "probabilities": {...}, "confidence": ... }
-  },
-  "usage": {...}
+  "answers": { "<qid>": { "type": "choice", "choice": "...", "probabilities": {}, "confidence": ... } },
+  "usage": {}
 }
 ```
 
-The handler writes `{ "pack", "model", "answers", "usage" }` to the output variable so
-the BPMN process can branch on individual question results.
+## Getting started
 
-## Configuration (environment variables)
+### Prerequisites
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `CAMUNDA_GRPC_ADDRESS` | `localhost:26500` | Zeebe gateway host:port |
-| `CAMUNDA_REST_ADDRESS` | `http://localhost:8080` | Camunda REST address (SaaS) |
-| `CAMUNDA_AUTH_STRATEGY` | `OAUTH` | `NONE` = dev/plaintext, `OAUTH` = Camunda SaaS/OIDC |
-| `CLIENT_ID` / `CLIENT_SECRET` | *(empty)* | Camunda SaaS client credentials (when OAUTH) |
-| `OAUTH_URL` | `https://login.cloud.camunda.io/oauth/token` | OIDC token endpoint |
-| `LAYABASE_URL` | `http://localhost:8000` | Laya serve base URL |
-| `LAYA_API_KEY` | *(empty)* | Optional bearer key for the Laya server |
-| `LAYA_WORKERS` | `4` | Max active jobs per worker |
+- **Java 21 + Maven 3.8+**
+- A **Laya** server answering `POST /v1/systemone` (self-hosted, Apache-2.0) —
+  point either consumer at it via `LAYA_BASE_URL` (worker) or the **Laya Base URL**
+  input (connector).
+- A Camunda 8 cluster — SaaS or self-managed.
 
-## Build & test
-
-Requires **Java 21** and **Maven 3.8+**.
+### Build all modules
 
 ```bash
-mvn clean package        # runs the 5 unit tests, then shades a runnable fat jar
-# → target/camunda-laya-connector-0.1.0.jar
+mvn clean package          # core (5 tests) + worker (jar) + connector (2 tests + generated template)
 ```
 
-The shaded jar's manifest main class is `com.bpmforbusiness.laya.worker.LayaDecisionWorkerMain`
-(custom workers subclass/`open()` on `LayaDecisionWorker`; the deployable entry point is the `...Main` class).
+### Use the Connector (Camunda SDK)
 
-## Run — local dev (plaintext, no cluster)
+1. Install `connector/element-templates/laya-decision.json` in Camunda Modeler
+   (Settings → Element Templates) — it is **generated at build time** by the
+   `element-template-generator` plugin, so keep it in sync by rebuilding.
+2. Add a **Service Task**, apply **"Laya Decision (System 1)"**, and set:
+   - **Laya Base URL** — where `/v1/systemone` is served (default `http://localhost:8000`)
+   - **Laya API key (optional)** — a secret reference, e.g. `camunda.secrets.MY_KEY`
+   - **Decision pack** — pre-approved pack name (default `support/triage`)
+   - **State** — the process variable / expression the engine decides over
+   - **Result Variable / Result Expression** — how the typed answers are written back
+   - **Error Expression** — optional BPMN error mapping
+3. Run the connector in a **connector runtime** (Camunda SaaS connectors, or the
+   self-managed connector runtime — Docker `camunda/connectors` with your jar, or the
+   Spring Boot starter). The `@OutboundConnector(type = io.bpmforbusiness.laya:decision:1)`
+   registers it for job pickup.
 
-1. Start Laya so it answers `POST /v1/systemone` on `http://localhost:8000`
-   (e.g. `laya[serve]`, or its container image; Laya is Apache-2.0, self-hosted).
-2. Accept a plaintext connection from a local Camunda (or skip — see SaaS below):
+### Use the Worker (self-hosted)
 
 ```bash
-export CAMUNDA_AUTH_STRATEGY=NONE            # plaintext gRPC, no TLS
-export LAYABASE_URL=http://localhost:8000
-java -jar target/camunda-laya-connector-0.1.0.jar
+export CAMUNDA_AUTH_STRATEGY=NONE            # dev/plaintext, or OIDC creds for SaaS
+export LAYA_BASE_URL=http://localhost:8000
+java -jar worker/target/camunda-laya-connector-worker-0.1.0.jar
 ```
 
-## Run — against Camunda 8 SaaS
-
-1. In the Camunda **Console**: create a **Client** (API → Manage → Create
-   client) and grant it cluster permissions; note the `ClusterId`, region +
-   the client `ClientId` and `ClientSecret`.
-2. Point the worker at the cluster and the Laya server:
-
-```bash
-export CLIENT_ID=...            # Camunda SaaS client id
-export CLIENT_SECRET=...        # Camunda SaaS client secret
-export CAMUNDA_GRPC_ADDRESS=<clusterId>.<region>.zeebe.camunda.io:443
-export CAMUNDA_REST_ADDRESS=https://<clusterId>.<region>.zeebe.camunda.io:443
-export LAYABASE_URL=http://<laya-host>:8000
-java -jar target/camunda-laya-connector-0.1.0.jar
-```
-
-Log line to confirm it's up:
-`Laya decision worker ready. Task type='io.bpmforbusiness.laya:decision:1', ...`
-
-## Use in Camunda Modeler
-
-1. **Install the element template:** Menu → *Settings* → *Element Templates* →
-   add `element-templates/laya-decision.json` (or copy it into
-   `~/.camunda/element-templates/`).
-2. Add a **Service Task** and apply the **"Laya Decision (System 1)"** template.
-3. Set:
-   - **Decision pack** → a pack registered in the worker (default `support/triage`)
-   - **State variable** → the process variable holding the state to decide over
-     (default `ticketText`)
-   - **Result variable name** → where the decision record is written (default `jev`)
-4. Deploy the process, start an instance, and the worker completes the task,
-   writing `{ pack, model, answers, usage }` to the result variable.
+Config env vars: `CAMUNDA_GRPC_ADDRESS`, `CAMUNDA_REST_ADDRESS`,
+`CAMUNDA_AUTH_STRATEGY`, `CLIENT_ID`/`CLIENT_SECRET`/`OAUTH_URL`,
+`LAYA_BASE_URL`, `LAYA_API_KEY`, `LAYA_WORKERS`. The worker's own element template is
+at `worker/element-templates/laya-decision.json`.
 
 ## Registered packs
 
-Only pre-approved packs can be selected (the safety/versioning boundary). Today:
+Pre-approved packs live in `DecisionRegistry` (extend as needed). Today:
+- **`support/triage`** — decides on the state with `department` (choice:
+  billing/support/sales), `urgency` (score: low/medium/high), `churn_risk` (yes-no).
 
-- **`support/triage`** — decides on the `ticketText` variable with three questions:
-  - `department` (choice: billing / support / sales)
-  - `urgency` (score: low / medium / high)
-  - `churn_risk` (yes-no / noul)
+## Safety
 
-Add more packs in `DecisionRegistry` (and keep them versioned by name).
+- **Zero retries on a decision failure** — an unregistered pack (or missing state)
+  fails the task → a visible incident. Do not silently retry a scored answer.
+- **No exactly-once from the engine** — downstream idempotency is the workflow's job.
+- A scored recommendation is a candidate, not a fact — keep the record.
 
-## Operational safety
+## Error codes (catch as BPMN errors)
 
-- **Zero retries on a decision failure.** An unregistered pack or a missing state
-  variable fails the job with `retries=0` → a visible incident. Do not silently
-  retry a scored answer.
-- **No exactly-once from the engine** — downstream idempotency is the workflow's
-  job, not the engine's.
-- A scored recommendation is a candidate, not a fact — retain the record for audit.
+`UNREGISTERED_PACK` · `MISSING_STATE` · `LAYA_CALL_FAILED`
 
-## Publishing to Camunda (becoming an official connector)
+## Publishing
 
-This repo ships a self-contained **Zeebe job worker** — the right artifact when you
-deploy and operate it yourself. To have it listed in Camunda's connector catalog /
-Modeler so others can install it, convert it to a **Camunda Connector SDK outbound
-connector** and contribute to [`camunda/connectors`](https://github.com/camunda/connectors)
-(or publish your own connector repo following those conventions). The step-by-step
-for both routes is in the project's publish checklist (ask the maintainer / see the
-README source history). Key deltas for the SDK route:
-`io.camunda.connector` SDK + `@OutboundConnector(name, type, inputVariables)` +
-generated element template + secret-aware properties + connector test harness +
-Camunda's contribution criteria (Apache-2.0, marketplace descriptor).
+- **Worker:** deploy and run it yourself (see "Use the Worker").
+- **Connector → Camunda Marketplace:** the connector repo is public with this
+  README, source, and `LICENSE.md`. Submit the listing with a title, description,
+  the GitHub URL (`https://github.com/bpmforbusiness/camunda-laya-connector`), a
+  feature list, a logo/screenshots (hosted at a downloadable URL), and the support
+  links below.
+
+## Support & documentation
+
+- **Developer / this connector:** this README ·
+  Camunda [Connector SDK docs](https://docs.camunda.io/docs/components/connectors/custom-built-connectors/connector-sdk/)
+- **Laya engine:** [github.com/NandhaKishorM/laya](https://github.com/NandhaKishorM/laya)
+- **Support (by Milletech Systems Inc.):** contact **sales@milletechinc.com** ·
+  **770-619-0095** · [milletechai.com](https://www.milletechai.com)
+- **Vendor site:** [milletechinc.com](https://www.milletechinc.com)
 
 ## License
 
-MIT. A decision engine output is a scored candidate, not a fact.
+MIT — see `LICENSE.md`.
