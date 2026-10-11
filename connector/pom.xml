@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- Camunda Connector SDK outbound connector for Laya (System 1) decisions.
+       Follows docs.camunda.io/docs/components/connectors/custom-built-connectors/
+       connector-sdk/ plus the official camunda/connector-template-outbound scaffold. -->
+  <name>camunda-laya-connector</name>
+  <description>Camunda 8 Connector (outbound) that runs a Laya System-1 decision via POST /v1/systemone.</description>
+  <groupId>com.bpmforbusiness</groupId>
+  <artifactId>camunda-laya-connector</artifactId>
+  <packaging>jar</packaging>
+  <version>0.1.0</version>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <version.connectors>8.9.5</version.connectors>
+    <version.junit-jupiter>5.10.2</version.junit-jupiter>
+    <version.assertj>3.27.4</version.assertj>
+    <version.mockito>5.23.0</version.mockito>
+  </properties>
+
+  <dependencies>
+    <!-- Connector SDK (provided: the connector runtime supplies these) -->
+    <dependency>
+      <groupId>io.camunda.connector</groupId>
+      <artifactId>connector-core</artifactId>
+      <version>${version.connectors}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.camunda.connector</groupId>
+      <artifactId>connector-validation</artifactId>
+      <version>${version.connectors}</version>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.camunda.connector</groupId>
+      <artifactId>element-template-generator-annotations</artifactId>
+      <version>${version.connectors}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Shared Laya domain (DecisionPack / DecisionRegistry / LayaClient) -->
+    <dependency>
+      <groupId>com.bpmforbusiness</groupId>
+      <artifactId>camunda-laya-connector-core</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.13</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <!-- Tests -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${version.junit-jupiter}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>${version.assertj}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.camunda.connector</groupId>
+      <artifactId>connector-runtime-test</artifactId>
+      <version>${version.connectors}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.camunda.connector</groupId>
+      <artifactId>spring-boot-starter-camunda-connectors</artifactId>
+      <version>${version.connectors}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-junit-jupiter</artifactId>
+      <version>${version.mockito}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.6</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Generates element-templates/laya-decision.json from @ElementTemplate during package -->
+      <plugin>
+        <groupId>io.camunda.connector</groupId>
+        <artifactId>element-template-generator-maven-plugin</artifactId>
+        <version>${version.connectors}</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>generate-templates</goal></goals>
+          </execution>
+        </executions>
+        <configuration>
+          <connectors>
+            <connector>
+              <connectorClass>io.bpmforbusiness.laya.connector.LayaDecisionConnector</connectorClass>
+              <files>
+                <file>
+                  <templateId>com.bpmforbusiness.laya:decision:1</templateId>
+                  <templateFileName>laya-decision.json</templateFileName>
+                </file>
+              </files>
+            </connector>
+          </connectors>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <repositories>
+    <repository>
+      <id>connectors</id>
+      <url>https://artifacts.camunda.com/artifactory/connectors/</url>
+      <releases><enabled>true</enabled></releases>
+      <snapshots><enabled>false</enabled></snapshots>
+    </repository>
+    <repository>
+      <id>connectors-snapshots</id>
+      <url>https://artifacts.camunda.com/artifactory/connectors-snapshots/</url>
+      <releases><enabled>false</enabled></releases>
+      <snapshots><enabled>true</enabled></snapshots>
+    </repository>
+  </repositories>
+  <pluginRepositories>
+    <pluginRepository>
+      <id>connectors</id>
+      <url>https://artifacts.camunda.com/artifactory/connectors/</url>
+    </pluginRepository>
+    <pluginRepository>
+      <id>connectors-snapshots</id>
+      <url>https://artifacts.camunda.com/artifactory/connectors-snapshots/</url>
+    </pluginRepository>
+  </pluginRepositories>
+</project>
